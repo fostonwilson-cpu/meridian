@@ -26,8 +26,12 @@ export const useGlobeStore = create<GlobeStore>((set, get) => ({
   autoRotate: true,
   listOpen: false,
   reducedMotion: false,
-  select: (id) => set({ selectedId: id, autoRotate: false }),
-  clear: () => set({ selectedId: null }),
+  select: (id) => set({ selectedId: id, autoRotate: false, listOpen: false }),
+  clear: () =>
+    set({
+      selectedId: null,
+      autoRotate: get().reducedMotion ? false : true,
+    }),
   setHovered: (id) => set({ hoveredId: id }),
   setInteracting: (value) => set({ interacting: value }),
   setAutoRotate: (value) => set({ autoRotate: value }),

@@ -11,6 +11,9 @@ const SUN = new THREE.Vector3(3.6, 1.35, 2.15);
 const CAMERA_TARGET = new THREE.Vector3(0, 0, 0);
 const FOCUS_POS = new THREE.Vector3();
 const LOOK_AT = new THREE.Vector3();
+const VIEW_DIR = new THREE.Vector3();
+const VIEW_RIGHT = new THREE.Vector3();
+const WORLD_UP = new THREE.Vector3(0, 1, 0);
 
 const TEXTURE_URLS = {
   day: "/textures/earth-day.jpg",
@@ -37,18 +40,62 @@ void main() {
 
 const ATM_FRAG = /* glsl */ `
 uniform vec3 uColor;
+uniform vec3 uLight;
 uniform float uPower;
 uniform float uIntensity;
 varying vec3 vNormal;
 varying vec3 vWorldPos;
 void main() {
+  vec3 n = normalize(vNormal);
   vec3 viewDir = normalize(cameraPosition - vWorldPos);
-  float fresnel = pow(1.0 - abs(dot(viewDir, normalize(vNormal))), uPower);
-  gl_FragColor = vec4(uColor, clamp(fresnel * uIntensity, 0.0, 1.0));
+  float fresnel = pow(1.0 - abs(dot(viewDir, n)), uPower);
+  float sun = 0.38 + 0.62 * smoothstep(-0.2, 0.55, dot(n, normalize(uLight)));
+  gl_FragColor = vec4(uColor, clamp(fresnel * uIntensity * sun, 0.0, 1.0));
 }
 `;
 
 const EARTH_VERT = /* glsl */ `
+varying vec2 vUv;
+varying vec3 vWorldNormal;
+varying vec3 vWorldPos;
+void main() {
+  vUv = uv;
+  vec4 world = modelMatrix * vec4(position, 1.0);
+  vWorldPos = world.xyz;
+  vWorldNormal = normalize(mat3(modelMatrix) * normal);
+  gl_Position = projectionMatrix * viewMatrix * world;
+}
+`;
+
+const EARTH_FRAG = /* glsl */ `
+uniform sampler2D uDay;
+uniform sampler2D uNight;
+uniform vec3 uLight;
+uniform float uFade;
+varying vec2 vUv;
+varying vec3 vWorldNormal;
+varying vec3 vWorldPos;
+void main() {
+  vec3 n = normalize(vWorldNormal);
+  vec3 l = normalize(uLight);
+  vec3 v = normalize(cameraPosition - vWorldPos);
+  float ndl = dot(n, l);
+  float dayness = smoothstep(-0.16, 0.38, ndl);
+  vec3 day = texture2D(uDay, vUv).rgb;
+  vec3 night = texture2D(uNight, vUv).rgb;
+  vec3 nightMix = day * 0.2 + night * 1.45;
+  vec3 color = mix(nightMix, day, dayness);
+  float ocean = 1.0 - smoothstep(0.14, 0.42, dot(day, vec3(0.33)));
+  vec3 h = normalize(l + v);
+  float spec = pow(max(dot(n, h), 0.0), 52.0) * ocean * dayness;
+  color += spec * vec3(0.82, 0.9, 1.0) * 0.55;
+  float fresnel = pow(1.0 - max(dot(n, v), 0.0), 2.8);
+  color += vec3(0.42, 0.66, 0.95) * fresnel * (0.18 + 0.7 * dayness);
+  gl_FragColor = vec4(color * uFade, 1.0);
+}
+`;
+
+const CLOUD_VERT = /* glsl */ `
 varying vec2 vUv;
 varying vec3 vWorldNormal;
 void main() {
@@ -58,20 +105,17 @@ void main() {
 }
 `;
 
-const EARTH_FRAG = /* glsl */ `
-uniform sampler2D uDay;
-uniform sampler2D uNight;
+const CLOUD_FRAG = /* glsl */ `
+uniform sampler2D uClouds;
 uniform vec3 uLight;
+uniform float uFade;
 varying vec2 vUv;
 varying vec3 vWorldNormal;
 void main() {
-  vec3 normal = normalize(vWorldNormal);
-  float dayness = smoothstep(-0.08, 0.42, dot(normal, normalize(uLight)));
-  vec3 day = texture2D(uDay, vUv).rgb;
-  vec3 night = texture2D(uNight, vUv).rgb;
-  vec3 nightMix = day * 0.16 + night * 1.35;
-  vec3 color = mix(nightMix, day, dayness);
-  gl_FragColor = vec4(color, 1.0);
+  float cover = texture2D(uClouds, vUv).r;
+  float dayness = smoothstep(-0.12, 0.32, dot(normalize(vWorldNormal), normalize(uLight)));
+  float alpha = cover * mix(0.05, 0.22, dayness) * uFade;
+  gl_FragColor = vec4(vec3(0.9, 0.94, 0.97), alpha);
 }
 `;
 
@@ -154,23 +198,25 @@ function Atmosphere() {
   const outer = useMemo(
     () => ({
       uColor: { value: new THREE.Color("#7ea8d6") },
-      uPower: { value: 2.6 },
-      uIntensity: { value: 0.78 },
+      uLight: { value: SUN.clone().normalize() },
+      uPower: { value: 2.45 },
+      uIntensity: { value: 0.92 },
     }),
     [],
   );
   const inner = useMemo(
     () => ({
-      uColor: { value: new THREE.Color("#b7d0e8") },
-      uPower: { value: 4.4 },
-      uIntensity: { value: 0.22 },
+      uColor: { value: new THREE.Color("#c3daf0") },
+      uLight: { value: SUN.clone().normalize() },
+      uPower: { value: 4.2 },
+      uIntensity: { value: 0.28 },
     }),
     [],
   );
 
   return (
     <group>
-      <mesh scale={1.08} renderOrder={-1}>
+      <mesh scale={1.09} renderOrder={-1}>
         <sphereGeometry args={[GLOBE_RADIUS, 64, 64]} />
         <shaderMaterial
           vertexShader={ATM_VERT}
@@ -182,7 +228,7 @@ function Atmosphere() {
           side={THREE.BackSide}
         />
       </mesh>
-      <mesh scale={1.018} renderOrder={1}>
+      <mesh scale={1.02} renderOrder={1}>
         <sphereGeometry args={[GLOBE_RADIUS, 64, 64]} />
         <shaderMaterial
           vertexShader={ATM_VERT}
@@ -201,6 +247,7 @@ function Atmosphere() {
 function Earth() {
   const maps = useGlobeMaps();
   const cloudRef = useRef<THREE.Mesh>(null);
+  const fade = useRef(0);
 
   const earthUniforms = useMemo(() => {
     if (!maps) return null;
@@ -208,34 +255,48 @@ function Earth() {
       uDay: { value: maps.day },
       uNight: { value: maps.night },
       uLight: { value: SUN.clone().normalize() },
+      uFade: { value: 0 },
+    };
+  }, [maps]);
+
+  const cloudUniforms = useMemo(() => {
+    if (!maps) return null;
+    return {
+      uClouds: { value: maps.clouds },
+      uLight: { value: SUN.clone().normalize() },
+      uFade: { value: 0 },
     };
   }, [maps]);
 
   useFrame((_, delta) => {
     const dt = Math.min(delta, 0.1);
-    if (cloudRef.current) cloudRef.current.rotation.y += 0.01 * dt;
+    if (maps && fade.current < 1) {
+      fade.current = Math.min(1, fade.current + dt / 0.65);
+      if (earthUniforms) earthUniforms.uFade.value = fade.current;
+      if (cloudUniforms) cloudUniforms.uFade.value = fade.current;
+    }
+    if (cloudRef.current) cloudRef.current.rotation.y += 0.008 * dt;
   });
 
   return (
     <group>
       <mesh>
-        <sphereGeometry args={[GLOBE_RADIUS, 64, 64]} />
+        <sphereGeometry args={[GLOBE_RADIUS, 96, 64]} />
         {earthUniforms ? (
           <shaderMaterial vertexShader={EARTH_VERT} fragmentShader={EARTH_FRAG} uniforms={earthUniforms} />
         ) : (
-          <meshBasicMaterial color="#1e3a52" />
+          <meshBasicMaterial color="#152433" />
         )}
       </mesh>
-      {maps ? (
+      {cloudUniforms ? (
         <mesh ref={cloudRef} scale={1.008}>
-          <sphereGeometry args={[GLOBE_RADIUS, 48, 48]} />
-          <meshBasicMaterial
-            map={maps.clouds}
-            alphaMap={maps.clouds}
+          <sphereGeometry args={[GLOBE_RADIUS, 64, 48]} />
+          <shaderMaterial
+            vertexShader={CLOUD_VERT}
+            fragmentShader={CLOUD_FRAG}
+            uniforms={cloudUniforms}
             transparent
-            opacity={0.16}
             depthWrite={false}
-            color="#e4eef6"
           />
         </mesh>
       ) : null}
@@ -273,18 +334,25 @@ function Marker({
     node.lookAt(LOOK_AT);
   }, [position]);
 
-  useFrame(({ clock }, delta) => {
+  useFrame(({ camera, clock }, delta) => {
     const dt = Math.min(delta, 0.1);
     const t = clock.elapsedTime;
+    const facing = position.dot(camera.position) / (position.length() * camera.position.length());
+    const vis = THREE.MathUtils.smoothstep(-0.05, 0.22, facing);
+    const node = group.current;
+    if (node) {
+      node.visible = vis > 0.05;
+      node.userData.visibility = vis;
+    }
     const pulse = 1 + Math.sin(t * (selected ? 3.2 : 2.1) + lat) * (selected ? 0.16 : 0.08);
-    const scale = (selected ? 1.45 : hovered ? 1.22 : 1) * pulse;
+    const scale = (selected ? 1.5 : hovered ? 1.24 : 1) * pulse * (0.65 + vis * 0.35);
     if (halo.current) {
-      const s = 0.34 * scale;
+      const s = (selected ? 0.42 : 0.32) * scale;
       halo.current.scale.set(s, s, s);
     }
     if (ring.current) {
       ring.current.rotation.z += dt * (selected ? 0.7 : 0.25);
-      const r = 0.85 + (selected ? 0.2 : 0) + Math.sin(t * 2.4) * 0.06;
+      const r = 0.85 + (selected ? 0.22 : 0) + Math.sin(t * 2.4) * 0.06;
       ring.current.scale.setScalar(r);
     }
   });
@@ -295,27 +363,29 @@ function Marker({
         <spriteMaterial
           map={glow}
           transparent
+          depthTest
           depthWrite={false}
           blending={THREE.AdditiveBlending}
-          color={selected ? "#f2f7fc" : "#cfe0f0"}
-          opacity={selected ? 1 : 0.9}
+          color={selected ? "#f2f7fc" : hovered ? "#e4eef8" : "#cfe0f0"}
+          opacity={selected ? 1 : 0.88}
         />
       </sprite>
       <mesh>
-        <sphereGeometry args={[selected ? 0.032 : 0.024, 16, 16]} />
-        <meshBasicMaterial color={selected ? "#f7fbff" : "#d7e6f5"} />
+        <sphereGeometry args={[selected ? 0.034 : 0.022, 16, 16]} />
+        <meshBasicMaterial color={selected ? "#f7fbff" : "#d7e6f5"} depthTest />
       </mesh>
       <mesh ref={ring} rotation={[Math.PI / 2, 0, 0]}>
-        <torusGeometry args={[0.048, 0.0028, 8, 32]} />
+        <torusGeometry args={[0.05, 0.0026, 8, 32]} />
         <meshBasicMaterial
           color={selected ? "#e8f1f8" : "#9eb8d0"}
           transparent
-          opacity={selected ? 0.95 : 0.62}
+          opacity={selected ? 0.95 : 0.55}
+          depthTest
         />
       </mesh>
-      <mesh rotation={[Math.PI / 2, 0, 0]} position={[0, 0, selected ? 0.09 : 0.05]}>
-        <cylinderGeometry args={[0.0038, 0.0038, selected ? 0.16 : 0.09, 8]} />
-        <meshBasicMaterial color="#e8f1f8" transparent opacity={selected ? 0.85 : 0.45} />
+      <mesh rotation={[Math.PI / 2, 0, 0]} position={[0, 0, selected ? 0.1 : 0.045]}>
+        <cylinderGeometry args={[0.0036, 0.0036, selected ? 0.18 : 0.08, 8]} />
+        <meshBasicMaterial color="#e8f1f8" transparent opacity={selected ? 0.88 : 0.4} depthTest />
       </mesh>
       <mesh
         onClick={(event) => {
@@ -328,7 +398,7 @@ function Marker({
         }}
         onPointerOut={() => setHovered(null)}
       >
-        <sphereGeometry args={[0.09, 8, 8]} />
+        <sphereGeometry args={[0.1, 8, 8]} />
         <meshBasicMaterial transparent opacity={0} depthWrite={false} />
       </mesh>
     </group>
@@ -365,12 +435,22 @@ function CameraRig() {
 
   useEffect(() => {
     const controls = ref.current;
-    if (!controls || !selectedId) return;
+    if (!controls) return;
+    if (!selectedId) {
+      void controls.setLookAt(1.05, 0.4, 3.35, 0, 0, 0, !reducedMotion);
+      return;
+    }
     const place = LOCATIONS.find((item) => item.id === selectedId);
     if (!place) return;
-    const distance = THREE.MathUtils.clamp(controls.distance, 2.75, 3.9);
-    const viewLat = THREE.MathUtils.clamp(place.lat * 0.62, -58, 58);
-    latLngToVector3(viewLat, place.lng, distance, FOCUS_POS);
+    const distance = THREE.MathUtils.clamp(controls.distance, 2.7, 3.55);
+    const viewLat = THREE.MathUtils.clamp(place.lat * 0.58, -54, 54);
+    latLngToVector3(viewLat, place.lng, 1, VIEW_DIR);
+    FOCUS_POS.copy(VIEW_DIR).multiplyScalar(distance);
+    VIEW_RIGHT.crossVectors(VIEW_DIR, WORLD_UP);
+    if (VIEW_RIGHT.lengthSq() < 0.0001) VIEW_RIGHT.set(1, 0, 0);
+    else VIEW_RIGHT.normalize();
+    FOCUS_POS.addScaledVector(VIEW_RIGHT, 0.12);
+    CAMERA_TARGET.copy(VIEW_DIR).multiplyScalar(0.18);
     void controls.setLookAt(
       FOCUS_POS.x,
       FOCUS_POS.y,
@@ -387,7 +467,7 @@ function CameraRig() {
     if (!controls) return;
     const dt = Math.min(delta, 0.1);
     if (autoRotate && !interacting && !selectedId && !transitioning.current && !reducedMotion) {
-      controls.azimuthAngle += 0.11 * dt;
+      controls.azimuthAngle += 0.1 * dt;
     }
   });
 
@@ -395,15 +475,15 @@ function CameraRig() {
     <CameraControls
       ref={ref}
       makeDefault
-      minDistance={2.4}
-      maxDistance={5.5}
-      minPolarAngle={0.18}
-      maxPolarAngle={Math.PI - 0.18}
-      smoothTime={0.72}
-      draggingSmoothTime={0.14}
+      minDistance={2.35}
+      maxDistance={5.2}
+      minPolarAngle={0.2}
+      maxPolarAngle={Math.PI - 0.2}
+      smoothTime={0.78}
+      draggingSmoothTime={0.12}
       azimuthRotateSpeed={0.58}
       polarRotateSpeed={0.52}
-      dollySpeed={0.35}
+      dollySpeed={0.32}
       onStart={() => setInteracting(true)}
       onEnd={() => setInteracting(false)}
       onTransitionStart={() => {
@@ -433,9 +513,7 @@ function SceneContent({ glow }: { glow: THREE.Texture }) {
   return (
     <>
       <color attach="background" args={["#06080c"]} />
-      <ambientLight intensity={0.3} color="#b7c7d8" />
-      <hemisphereLight args={["#d7e4f2", "#0c141c", 0.4]} />
-      <Stars radius={90} depth={42} count={2200} factor={2.6} saturation={0} fade speed={0.35} />
+      <Stars radius={90} depth={48} count={1800} factor={2.4} saturation={0} fade speed={0.28} />
       <Earth />
       <Atmosphere />
       <Markers glow={glow} />
@@ -459,12 +537,12 @@ export function GlobeScene() {
 
   return (
     <div
-      className="absolute inset-0 touch-none"
+      className="absolute inset-0 touch-none max-md:bottom-40 md:right-[26rem]"
       role="application"
       aria-label="Interactive Earth globe. Drag to spin. Click a glowing marker to focus."
     >
       <Canvas
-        camera={{ position: [0, 0.38, 3.55], fov: 42, near: 0.1, far: 200 }}
+        camera={{ position: [1.05, 0.4, 3.35], fov: 40, near: 0.1, far: 200 }}
         dpr={[1, 1.75]}
         gl={{
           antialias: true,

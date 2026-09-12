@@ -87,6 +87,18 @@
   }
 }
 
+@keyframes pulse-dot {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.45;
+    transform: scale(0.65);
+  }
+}
+
 .rise-in {
   animation: rise-in var(--motion-slow) var(--ease-smooth-out) both;
 }
@@ -105,18 +117,36 @@
   background:
     linear-gradient(
       90deg,
-      color-mix(in oklab, var(--color-bg) 55%, transparent) 0%,
-      transparent 26%
+      color-mix(in oklab, var(--color-bg) 42%, transparent) 0%,
+      transparent 22%
     ),
     linear-gradient(
       180deg,
-      color-mix(in oklab, var(--color-bg) 48%, transparent) 0%,
-      transparent 22%
+      color-mix(in oklab, var(--color-bg) 40%, transparent) 0%,
+      transparent 18%
     );
+}
+
+.scene-title {
+  text-shadow: 0 1px 22px color-mix(in oklab, var(--color-bg) 80%, transparent);
+}
+
+.atlas-panel {
+  background: color-mix(in oklab, var(--color-surface) 82%, transparent);
+  box-shadow: var(--shadow-panel);
+  backdrop-filter: blur(12px);
+}
+
+.marker-dot-live {
+  animation: pulse-dot 2.4s var(--ease-out) infinite;
 }
 
 @media (prefers-reduced-motion: reduce) {
   .rise-in {
+    animation: none;
+  }
+
+  .marker-dot-live {
     animation: none;
   }
 }

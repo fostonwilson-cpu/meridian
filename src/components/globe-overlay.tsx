@@ -1,4 +1,4 @@
-import { Compass, MapPin, Pause, Play, X } from "lucide-react";
+import { Compass, Pause, Play, X } from "lucide-react";
 import { useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { useGlobeStore } from "@/lib/globe-store";
@@ -17,7 +17,9 @@ export function GlobeOverlay() {
   const setListOpen = useGlobeStore((s) => s.setListOpen);
   const cycle = useGlobeStore((s) => s.cycle);
   const selected = getLocation(selectedId);
+  const hovered = getLocation(hoveredId);
   const activeId = hoveredId ?? selectedId;
+  const selectedIndex = selected ? LOCATIONS.findIndex((item) => item.id === selected.id) + 1 : 0;
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -26,10 +28,10 @@ export function GlobeOverlay() {
       if (event.key === "Escape") {
         clear();
         setListOpen(false);
-      } else if (event.key === "ArrowDown") {
+      } else if (event.key === "ArrowDown" || event.key === "ArrowRight") {
         event.preventDefault();
         cycle(1);
-      } else if (event.key === "ArrowUp") {
+      } else if (event.key === "ArrowUp" || event.key === "ArrowLeft") {
         event.preventDefault();
         cycle(-1);
       }
@@ -43,7 +45,7 @@ export function GlobeOverlay() {
       <div className="scene-scrim absolute inset-0" aria-hidden />
       <header className="pointer-events-auto absolute top-0 left-0 p-5 pt-[max(1.25rem,env(safe-area-inset-top))] sm:p-7">
         <p className="rise-in font-sans text-xs tracking-widest text-muted uppercase">Living atlas</p>
-        <h1 className="rise-in rise-in-delay-1 font-display mt-1 text-4xl leading-tight tracking-tight text-fg italic sm:text-5xl">
+        <h1 className="rise-in rise-in-delay-1 scene-title font-display mt-1 text-4xl leading-tight tracking-tight text-fg italic sm:text-5xl">
           Meridian
         </h1>
         <p className="rise-in rise-in-delay-2 mt-2 max-w-xs text-sm text-muted">
@@ -71,17 +73,20 @@ export function GlobeOverlay() {
           "sm:right-7 sm:bottom-7",
         )}
       >
-        <LocationDetail selected={selected} onClear={clear} />
-        <nav
-          aria-label="Featured places"
-          className="flex max-h-[min(52vh,28rem)] flex-col overflow-hidden rounded-xl bg-surface/82 p-3 shadow-[var(--shadow-panel)]"
-        >
+        <LocationDetail
+          selected={selected}
+          hovered={hovered}
+          index={selectedIndex}
+          total={LOCATIONS.length}
+          onClear={clear}
+        />
+        <nav aria-label="Featured places" className="atlas-panel flex max-h-[min(52vh,28rem)] flex-col overflow-hidden rounded-xl p-3">
           <div className="mb-2 flex items-center justify-between px-2 pt-1">
             <p className="text-xs tracking-widest text-muted uppercase">Featured</p>
             <p className="font-sans text-xs text-faint tabular-nums">{LOCATIONS.length}</p>
           </div>
           <ul className="min-h-0 flex-1 space-y-0.5 overflow-y-auto pr-1">
-            {LOCATIONS.map((place) => {
+            {LOCATIONS.map((place, index) => {
               const current = place.id === activeId;
               const on = place.id === selectedId;
               return (
@@ -93,14 +98,14 @@ export function GlobeOverlay() {
                     onPointerLeave={() => setHovered(null)}
                     aria-current={on ? "true" : undefined}
                     className={cn(
-                      "flex min-h-11 w-full items-center gap-3 rounded-md px-3 text-left transition-[background-color,color,box-shadow] duration-(--motion-quick) ease-(--ease-out)",
+                      "flex min-h-11 w-full items-center gap-3 rounded-md px-3 text-left transition-[background-color,color] duration-(--motion-quick) ease-(--ease-out)",
                       current ? "bg-surface-2 text-fg" : "text-muted hover:bg-surface-2/80 hover:text-fg",
                     )}
                   >
                     <span
                       className={cn(
-                        "size-1.5 shrink-0 rounded-full",
-                        on ? "bg-accent" : "bg-faint",
+                        "size-1.5 shrink-0 rounded-full bg-faint",
+                        on && "bg-accent marker-dot-live",
                       )}
                       aria-hidden
                     />
@@ -109,7 +114,7 @@ export function GlobeOverlay() {
                       <span className="block truncate text-xs text-faint">{place.region}</span>
                     </span>
                     <span className="shrink-0 text-xs text-faint tabular-nums">
-                      {formatCoord(place.lat, place.lng).split("  ")[0]}
+                      {String(index + 1).padStart(2, "0")}
                     </span>
                   </button>
                 </li>
@@ -127,7 +132,7 @@ export function GlobeOverlay() {
       >
         <div
           className={cn(
-            "mx-3 overflow-hidden rounded-t-xl bg-surface/90 shadow-[var(--shadow-panel)]",
+            "atlas-panel mx-3 overflow-hidden rounded-t-xl",
             "transition-[max-height] duration-(--motion-slow) ease-(--ease-smooth-out)",
             listOpen ? "max-h-[72vh]" : "max-h-44",
           )}
@@ -176,7 +181,7 @@ export function GlobeOverlay() {
                         on ? "bg-surface-2 text-fg" : "text-muted",
                       )}
                     >
-                      <MapPin className="size-3.5 shrink-0" strokeWidth={1.75} />
+                      <span className={cn("size-1.5 shrink-0 rounded-full", on ? "bg-accent" : "bg-faint")} />
                       <span className="min-w-0 flex-1 truncate text-sm font-medium text-fg">
                         {place.name}
                       </span>
@@ -199,14 +204,21 @@ export function GlobeOverlay() {
 
 function LocationDetail({
   selected,
+  hovered,
+  index,
+  total,
   onClear,
 }: {
   selected: ReturnType<typeof getLocation>;
+  hovered: ReturnType<typeof getLocation>;
+  index: number;
+  total: number;
   onClear: () => void;
 }) {
-  if (!selected) {
+  const place = selected ?? hovered;
+  if (!place) {
     return (
-      <div className="rounded-xl bg-surface/70 px-5 py-4 shadow-[var(--shadow-panel)]">
+      <div className="atlas-panel rounded-xl px-5 py-4">
         <p className="text-xs tracking-widest text-muted uppercase">Now</p>
         <p className="font-display mt-1 text-2xl leading-tight text-fg italic">In orbit</p>
         <p className="mt-2 text-sm text-muted">
@@ -216,21 +228,30 @@ function LocationDetail({
     );
   }
 
+  const isPreview = !selected && Boolean(hovered);
+
   return (
-    <div className="rounded-xl bg-surface/82 px-5 py-4 shadow-[var(--shadow-panel)]">
+    <div className="atlas-panel rounded-xl px-5 py-4">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <p className="text-xs tracking-widest text-muted uppercase">{selected.region}</p>
+          <p className="text-xs tracking-widest text-muted uppercase">
+            {isPreview ? "Passing" : place.region}
+          </p>
           <h2 className="font-display mt-1 text-3xl leading-tight tracking-tight text-fg italic">
-            {selected.name}
+            {place.name}
           </h2>
         </div>
-        <Button variant="ghost" size="icon" onClick={onClear} aria-label="Clear selection" className="shrink-0">
-          <X className="size-4" strokeWidth={1.75} />
-        </Button>
+        {selected ? (
+          <Button variant="ghost" size="icon" onClick={onClear} aria-label="Return to orbit" className="shrink-0">
+            <X className="size-4" strokeWidth={1.75} />
+          </Button>
+        ) : null}
       </div>
-      <p className="mt-2 text-xs text-faint tabular-nums">{formatCoord(selected.lat, selected.lng)}</p>
-      <p className="mt-3 text-sm text-muted">{selected.blurb}</p>
+      <p className="mt-2 text-xs text-faint tabular-nums">
+        {selected ? `${String(index).padStart(2, "0")} / ${String(total).padStart(2, "0")}  ·  ` : null}
+        {formatCoord(place.lat, place.lng)}
+      </p>
+      <p className="mt-3 text-sm text-muted">{place.blurb}</p>
     </div>
   );
 }
